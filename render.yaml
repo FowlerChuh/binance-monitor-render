@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: binance-copy-monitor
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: PORTFOLIO_ID
+        value: "5075281354358777856"
+      - key: CHECK_INTERVAL
+        value: "10"
+      - key: MAX_RUNTIME
+        value: "0"
+      - key: SEND_STARTUP
+        value: "1"
+      - key: TG_BOT_TOKEN
+        sync: false
+      - key: TG_CHAT_ID
+        sync: false
