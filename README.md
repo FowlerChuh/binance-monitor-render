@@ -1,6 +1,6 @@
 # Binance 跟单实时监控（Render 免费版）
 
-10 秒轮询币安跟单接口，有新成交时推送到 Telegram。
+10 秒级轮询币安跟单接口（默认 5 秒，检测到成交后 3 秒爆发 2 分钟），有新成交时推送到 Telegram。
 
 ## 为什么是 Render
 
@@ -25,7 +25,10 @@
 | `TG_BOT_TOKEN` | 必填 | Telegram Bot Token |
 | `TG_CHAT_ID` | 必填 | 接收推送的 chat id |
 | `PORTFOLIO_ID` | `5075281354358777856` | 被跟单的组合 ID |
-| `CHECK_INTERVAL` | `10` | 轮询间隔（秒） |
+| `CHECK_INTERVAL` | `5` | 常规轮询间隔（秒，带 ±15% 抖动） |
+| `BURST_INTERVAL` | `3` | 检测到新成交后的爆发间隔（秒） |
+| `BURST_WINDOW` | `120` | 爆发模式持续时间（秒） |
+| `JITTER` | `0.15` | 间隔随机抖动比例 |
 | `MAX_RUNTIME` | `0` | 0 = 永久运行 |
 | `SEND_STARTUP` | `1` | 启动时是否发一条启动消息 |
 | `PORT` | Render 注入 | 健康检查端口 |

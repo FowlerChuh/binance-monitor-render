@@ -2,6 +2,7 @@ import os
 import sys
 import signal
 import time
+import random
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -12,7 +13,12 @@ from datetime import datetime
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "").strip()
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
 PORTFOLIO_ID = os.environ.get("PORTFOLIO_ID", "5075281354358777856").strip()
-CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL", "10"))
+CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL", "5"))
+# 检测到新成交后进入「爆发模式」，用更短的间隔抓同一批连续下单
+BURST_INTERVAL = int(os.environ.get("BURST_INTERVAL", "3"))
+BURST_WINDOW = int(os.environ.get("BURST_WINDOW", "120"))
+# 轮询间隔随机抖动比例，避免固定周期特征被风控识别
+JITTER = float(os.environ.get("JITTER", "0.15"))
 # MAX_RUNTIME=0 表示永久运行；GitHub Actions 等场景可设为 21000（约 5h50m）
 MAX_RUNTIME = int(os.environ.get("MAX_RUNTIME", "0"))
 SEND_STARTUP = os.environ.get("SEND_STARTUP", "1").lower() not in ("0", "false", "no")
@@ -244,6 +250,7 @@ def main():
     logging.info("🦅 熬鹰资本实时交易流水监控系统已启动...")
     logging.info(
         f"配置: portfolio={PORTFOLIO_ID} interval={CHECK_INTERVAL}s "
+        f"burst={BURST_INTERVAL}s/{BURST_WINDOW}s jitter=±{int(JITTER * 100)}% "
         f"max_runtime={MAX_RUNTIME or '∞'}s startup_msg={SEND_STARTUP}"
     )
 
@@ -275,6 +282,8 @@ def main():
             f"监控状态：`7x24小时监听（带断网自愈能力）`"
         )
 
+    burst_until = 0.0
+
     while not should_stop():
         orders = fetch_orders_with_reconnect()
         if orders:
@@ -283,6 +292,10 @@ def main():
                 uid = f"{o.get('orderUpdateTime')}_{o.get('symbol')}_{o.get('executedQty')}"
                 if uid not in seen_order_ids:
                     new_orders.append((uid, o))
+
+            if new_orders:
+                # 有人在下单，进入爆发模式，抓同一批连续成交
+                burst_until = time.time() + BURST_WINDOW
 
             for uid, o in reversed(new_orders):
                 seen_order_ids.add(uid)
@@ -316,7 +329,8 @@ def main():
                 logging.info(f"检测到新交易: {symbol} {action} 金额: {order_value:,.2f} {unit}")
                 send_telegram_msg(msg)
 
-        time.sleep(CHECK_INTERVAL)
+        base = BURST_INTERVAL if time.time() < burst_until else CHECK_INTERVAL
+        time.sleep(max(1.0, base * random.uniform(1 - JITTER, 1 + JITTER)))
 
     logging.info("监控已停止，补发积压消息后退出。")
     flush_pending_messages()
