@@ -326,7 +326,11 @@ def main():
 
                 msg += f"成交时间：`{time_str}`"
 
-                logging.info(f"检测到新交易: {symbol} {action} 金额: {order_value:,.2f} {unit}")
+                lag = max(0.0, time.time() - o.get("orderUpdateTime", 0) / 1000)
+                logging.info(
+                    f"检测到新交易: {symbol} {action} 金额: {order_value:,.2f} {unit} "
+                    f"(成交延迟 {lag:.1f}s)"
+                )
                 send_telegram_msg(msg)
 
         base = BURST_INTERVAL if time.time() < burst_until else CHECK_INTERVAL

@@ -29,6 +29,7 @@
 | `BURST_INTERVAL` | `3` | 检测到新成交后的爆发间隔（秒） |
 | `BURST_WINDOW` | `120` | 爆发模式持续时间（秒） |
 | `JITTER` | `0.15` | 间隔随机抖动比例 |
+| `TZ` | `Asia/Bangkok` | 推送时间使用的时区（+07），按需修改 |
 | `MAX_RUNTIME` | `0` | 0 = 永久运行 |
 | `SEND_STARTUP` | `1` | 启动时是否发一条启动消息 |
 | `PORT` | Render 注入 | 健康检查端口 |
