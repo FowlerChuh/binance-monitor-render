@@ -33,6 +33,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 # /bapi/ 必须请求主站域名，不能用 api.binance.com，否则必出 403
 ORDER_HISTORY_URL = "https://www.binance.com/bapi/futures/v1/friendly/future/copy-trade/lead-portfolio/order-history"
+# 账户总览：带单保证金余额、是否公开仓位
+PORTFOLIO_DETAIL_URL = "https://www.binance.com/bapi/futures/v1/friendly/future/copy-trade/lead-portfolio/detail"
 
 # 补全防封反爬专属请求头（避开 Cloudflare 403）
 HEADERS = {
@@ -150,7 +152,7 @@ def fetch_orders_with_reconnect():
     payload = {
         "portfolioId": str(PORTFOLIO_ID),
         "pageNumber": 1,
-        "pageSize": 5,
+        "pageSize": 10,
     }
 
     while True:
@@ -243,6 +245,64 @@ def calculate_order_value(order):
     return price, qty, order_value, leverage, margin_val, unit
 
 
+# ----------------- 总体杠杆估算 -----------------
+# 币安隐藏带单员持仓时，无法直接拿到"当前总仓位"。
+# 这里按成交流水累计每个 (标的, 方向) 的未平仓货值：
+#   开仓/加仓 -> 加上该笔货值；平仓/减仓 -> 减去该笔货值
+# 再用 未平仓货值合计 / 带单保证金余额 得到总体杠杆（估算值）。
+open_notional = {}  # {(symbol, positionSide): 未平仓货值}
+
+
+def is_opening_order(order) -> bool:
+    side = order.get("side")
+    pos_side = order.get("positionSide")
+    if pos_side == "LONG":
+        return side == "BUY"
+    if pos_side == "SHORT":
+        return side == "SELL"
+    return False
+
+
+def apply_order_to_positions(order) -> float:
+    """把一笔成交累计进未平仓货值，返回该笔货值"""
+    _, _, value, _, _, _ = calculate_order_value(order)
+    key = (order.get("symbol") or "", order.get("positionSide") or "")
+
+    if is_opening_order(order):
+        open_notional[key] = open_notional.get(key, 0.0) + value
+    else:
+        remain = open_notional.get(key, 0.0) - value
+        if remain > 1e-6:
+            open_notional[key] = remain
+        else:
+            open_notional.pop(key, None)
+    return value
+
+
+def total_open_notional() -> float:
+    return sum(open_notional.values())
+
+
+def fetch_account_snapshot():
+    """返回 (保证金余额, 是否公开持仓)；失败时为 (None, None)"""
+    try:
+        resp = session.get(
+            PORTFOLIO_DETAIL_URL,
+            headers=HEADERS,
+            params={"portfolioId": str(PORTFOLIO_ID)},
+            timeout=(5, 10),
+        )
+        if resp.status_code == 200:
+            data = resp.json().get("data") or {}
+            mb = data.get("marginBalance")
+            margin_balance = float(mb) if mb not in (None, "") else None
+            return margin_balance, data.get("positionShow")
+        logging.warning(f"获取账户总览失败: HTTP {resp.status_code}")
+    except Exception as e:
+        logging.warning(f"获取账户总览失败: {e.__class__.__name__}")
+    return None, None
+
+
 def main():
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
@@ -270,16 +330,31 @@ def main():
         uid = f"{o.get('orderUpdateTime')}_{o.get('symbol')}_{o.get('executedQty')}"
         seen_order_ids.add(uid)
 
+    # 用最近 10 笔成交重建一个初始未平仓货值（更早的仓位拿不到，只能从能看到的开始累计）
+    for o in reversed(initial_orders):
+        apply_order_to_positions(o)
+    logging.info(f"初始未平仓货值（按最近 {len(initial_orders)} 笔重建）: {total_open_notional():,.2f} USDT")
+
     first = initial_orders[0]
     f_price, f_qty, f_val, _, _, f_unit = calculate_order_value(first)
     latest_desc = f"{first.get('symbol')} {format_action(first)} @ {f_price} (金额: `{f_val:,.2f} {f_unit}`)"
     logging.info(f"历史订单已同步，最近一笔是: {latest_desc}")
 
     if SEND_STARTUP:
+        startup_account = ""
+        margin_balance, position_show = fetch_account_snapshot()
+        if margin_balance and margin_balance > 0:
+            total_open = total_open_notional()
+            startup_account = (
+                f"\n带单保证金余额：`{margin_balance:,.2f} USDT`\n"
+                f"未平仓货值：`{total_open:,.2f} USDT`\n"
+                f"总体杠杆：`{total_open / margin_balance:.2f}x`"
+                + ("（对方隐藏仓位，估算值）" if position_show is False else "")
+            )
         send_telegram_msg(
             f"🚀 *【熬鹰资本】实时跟单雷达已启动！*\n\n"
             f"当前最新动态：{latest_desc}\n"
-            f"监控状态：`7x24小时监听（带断网自愈能力）`"
+            f"监控状态：`7x24小时监听（带断网自愈能力）`{startup_account}"
         )
 
     burst_until = 0.0
@@ -303,6 +378,8 @@ def main():
                 symbol = o.get("symbol", "")
                 price, qty, order_value, leverage, margin_val, unit = calculate_order_value(o)
                 pnl = float(o.get("totalPnl", 0))
+                # 先累计这笔成交，让推送里的总体杠杆反映成交后的状态
+                apply_order_to_positions(o)
                 time_str = datetime.fromtimestamp(o.get("orderUpdateTime", 0) / 1000).strftime(
                     "%Y-%m-%d %H:%M:%S"
                 )
@@ -325,6 +402,23 @@ def main():
                     msg += f"已实现盈亏：{pnl_emoji} `{pnl:+.2f} {unit}`\n"
 
                 msg += f"成交时间：`{time_str}`"
+
+                margin_balance, position_show = fetch_account_snapshot()
+                if margin_balance and margin_balance > 0:
+                    total_open = total_open_notional()
+                    overall_leverage = total_open / margin_balance
+                    msg += (
+                        f"\n\n📊 *带单账户总览*\n"
+                        f"保证金余额：`{margin_balance:,.2f} USDT`\n"
+                        f"未平仓货值：`{total_open:,.2f} USDT`\n"
+                        f"总体杠杆：`{overall_leverage:.2f}x`"
+                    )
+                    if position_show is False:
+                        msg += "\n（对方隐藏仓位，货值为监控累计估算值）"
+                    logging.info(
+                        f"账户总览: 保证金 {margin_balance:,.2f} | 未平仓货值 {total_open:,.2f} "
+                        f"| 总体杠杆 {overall_leverage:.2f}x"
+                    )
 
                 lag = max(0.0, time.time() - o.get("orderUpdateTime", 0) / 1000)
                 logging.info(
