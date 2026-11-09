@@ -303,6 +303,48 @@ def fetch_account_snapshot():
     return None, None
 
 
+def build_trade_message(order, margin_balance=None, position_show=None, total_open=None) -> str:
+    action = format_action(order)
+    symbol = order.get("symbol", "")
+    price, qty, order_value, leverage, margin_val, unit = calculate_order_value(order)
+    pnl = float(order.get("totalPnl", 0))
+    time_str = datetime.fromtimestamp(order.get("orderUpdateTime", 0) / 1000).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+    msg = (
+        f"🦅 *熬鹰资本最新交易提醒！*\n\n"
+        f"动作：*{action}*\n"
+        f"标的：`{symbol}`\n"
+        f"成交均价：`{price}`\n"
+        f"成交数量：`{qty}`\n"
+        f"💵 *开单金额（货值）*：`{order_value:,.2f} {unit}`\n"
+    )
+
+    if margin_val is not None:
+        msg += f"杠杆倍数：`{leverage}x`\n"
+        msg += f"预估占用本金：`{margin_val:,.2f} {unit}`\n"
+
+    if pnl != 0:
+        pnl_emoji = "💰" if pnl > 0 else "🩸"
+        msg += f"已实现盈亏：{pnl_emoji} `{pnl:+.2f} {unit}`\n"
+
+    msg += f"成交时间：`{time_str}`"
+
+    if margin_balance and margin_balance > 0:
+        total_open = total_open or 0.0
+        msg += (
+            f"\n\n📊 *带单账户总览*\n"
+            f"保证金余额：`{margin_balance:,.2f} USDT`\n"
+            f"未平仓货值：`{total_open:,.2f} USDT`\n"
+            f"总体杠杆：`{total_open / margin_balance:.2f}x`"
+        )
+        if position_show is False:
+            msg += "\n（对方隐藏仓位，货值为监控累计估算值）"
+
+    return msg
+
+
 def main():
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
@@ -374,50 +416,20 @@ def main():
 
             for uid, o in reversed(new_orders):
                 seen_order_ids.add(uid)
-                action = format_action(o)
-                symbol = o.get("symbol", "")
-                price, qty, order_value, leverage, margin_val, unit = calculate_order_value(o)
-                pnl = float(o.get("totalPnl", 0))
                 # 先累计这笔成交，让推送里的总体杠杆反映成交后的状态
                 apply_order_to_positions(o)
-                time_str = datetime.fromtimestamp(o.get("orderUpdateTime", 0) / 1000).strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
-
-                msg = (
-                    f"🦅 *熬鹰资本最新交易提醒！*\n\n"
-                    f"动作：*{action}*\n"
-                    f"标的：`{symbol}`\n"
-                    f"成交均价：`{price}`\n"
-                    f"成交数量：`{qty}`\n"
-                    f"💵 *开单金额（货值）*：`{order_value:,.2f} {unit}`\n"
-                )
-
-                if margin_val is not None:
-                    msg += f"杠杆倍数：`{leverage}x`\n"
-                    msg += f"预估占用本金：`{margin_val:,.2f} {unit}`\n"
-
-                if pnl != 0:
-                    pnl_emoji = "💰" if pnl > 0 else "🩸"
-                    msg += f"已实现盈亏：{pnl_emoji} `{pnl:+.2f} {unit}`\n"
-
-                msg += f"成交时间：`{time_str}`"
-
                 margin_balance, position_show = fetch_account_snapshot()
+                total_open = total_open_notional()
+                msg = build_trade_message(o, margin_balance, position_show, total_open)
+
+                action = format_action(o)
+                symbol = o.get("symbol", "")
+                _, _, order_value, _, _, unit = calculate_order_value(o)
+
                 if margin_balance and margin_balance > 0:
-                    total_open = total_open_notional()
-                    overall_leverage = total_open / margin_balance
-                    msg += (
-                        f"\n\n📊 *带单账户总览*\n"
-                        f"保证金余额：`{margin_balance:,.2f} USDT`\n"
-                        f"未平仓货值：`{total_open:,.2f} USDT`\n"
-                        f"总体杠杆：`{overall_leverage:.2f}x`"
-                    )
-                    if position_show is False:
-                        msg += "\n（对方隐藏仓位，货值为监控累计估算值）"
                     logging.info(
                         f"账户总览: 保证金 {margin_balance:,.2f} | 未平仓货值 {total_open:,.2f} "
-                        f"| 总体杠杆 {overall_leverage:.2f}x"
+                        f"| 总体杠杆 {total_open / margin_balance:.2f}x"
                     )
 
                 lag = max(0.0, time.time() - o.get("orderUpdateTime", 0) / 1000)
