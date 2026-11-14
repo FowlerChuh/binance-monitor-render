@@ -303,51 +303,44 @@ def fetch_account_snapshot():
     return None, None
 
 
+def short_action(order) -> str:
+    """简短动作：开多 / 开空 / 平多 / 平空"""
+    pos_side = order.get("positionSide")
+    side = order.get("side")
+    if pos_side == "LONG":
+        return "开多" if side == "BUY" else "平多"
+    if pos_side == "SHORT":
+        return "开空" if side == "SELL" else "平空"
+    return f"{side} {pos_side}"
+
+
 def wan(value: float) -> str:
     """金额按「万」显示，只保留整数，例：217309 -> 22万"""
     return f"{value / 10000:,.0f}万"
 
 
 def build_trade_message(order, margin_balance=None, position_show=None, total_open=None) -> str:
-    action = format_action(order)
     symbol = order.get("symbol", "")
-    price, qty, order_value, leverage, margin_val, unit = calculate_order_value(order)
-    pnl = float(order.get("totalPnl", 0))
-    time_str = datetime.fromtimestamp(order.get("orderUpdateTime", 0) / 1000).strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    price, qty, order_value, _, _, _ = calculate_order_value(order)
 
-    msg = (
-        f"🦅 *熬鹰资本最新交易提醒！*\n\n"
-        f"动作：*{action}*\n"
-        f"标的：`{symbol}`\n"
-        f"成交均价：`{price}`\n"
-        f"成交数量：`{qty}`\n"
-        f"💵 *开单金额（货值）*：`{order_value:,.2f} {unit}`\n"
-    )
-
-    if margin_val is not None:
-        msg += f"杠杆倍数：`{leverage}x`\n"
-        msg += f"预估占用本金：`{margin_val:,.2f} {unit}`\n"
-
-    if pnl != 0:
-        pnl_emoji = "💰" if pnl > 0 else "🩸"
-        msg += f"已实现盈亏：{pnl_emoji} `{pnl:+.2f} {unit}`\n"
-
-    msg += f"成交时间：`{time_str}`"
+    lines = [
+        "🦅 熬鹰资本",
+        "",
+        f"1、动作：{symbol} {short_action(order)}",
+        f"2、成交金额：{wan(order_value)} USDT",
+        f"3、成交均价：{price}",
+        f"4、成交数量：{qty}",
+    ]
 
     if margin_balance and margin_balance > 0:
         total_open = total_open or 0.0
-        msg += (
-            f"\n\n📊 *带单账户总览*\n"
-            f"保证金余额：`{wan(margin_balance)} USDT`\n"
-            f"未平仓货值：`{wan(total_open)} USDT`\n"
-            f"总体杠杆：`{total_open / margin_balance:.2f}x`"
-        )
-        if position_show is False:
-            msg += "\n（对方隐藏仓位，货值为监控累计估算值）"
+        lines += [
+            f"5、保证金余额：{wan(margin_balance)} USDT",
+            f"6、未平仓货值：{wan(total_open)} USDT",
+            f"7、总体杠杆估算：{total_open / margin_balance:.2f}x",
+        ]
 
-    return msg
+    return "\n".join(lines)
 
 
 def main():
@@ -393,15 +386,14 @@ def main():
         if margin_balance and margin_balance > 0:
             total_open = total_open_notional()
             startup_account = (
-                f"\n带单保证金余额：`{wan(margin_balance)} USDT`\n"
-                f"未平仓货值：`{wan(total_open)} USDT`\n"
-                f"总体杠杆：`{total_open / margin_balance:.2f}x`"
-                + ("（对方隐藏仓位，估算值）" if position_show is False else "")
+                f"\n保证金余额：{wan(margin_balance)} USDT"
+                f"\n未平仓货值：{wan(total_open)} USDT"
+                f"\n总体杠杆估算：{total_open / margin_balance:.2f}x"
             )
         send_telegram_msg(
-            f"🚀 *【熬鹰资本】实时跟单雷达已启动！*\n\n"
-            f"当前最新动态：{latest_desc}\n"
-            f"监控状态：`7x24小时监听（带断网自愈能力）`{startup_account}"
+            f"🚀 熬鹰资本监控已启动\n\n"
+            f"最新：{first.get('symbol')} {short_action(first)} @ {f_price}"
+            f"{startup_account}"
         )
 
     burst_until = 0.0
