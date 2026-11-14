@@ -303,6 +303,11 @@ def fetch_account_snapshot():
     return None, None
 
 
+def wan(value: float) -> str:
+    """金额按「万」显示，只保留整数，例：217309 -> 22万"""
+    return f"{value / 10000:,.0f}万"
+
+
 def build_trade_message(order, margin_balance=None, position_show=None, total_open=None) -> str:
     action = format_action(order)
     symbol = order.get("symbol", "")
@@ -335,8 +340,8 @@ def build_trade_message(order, margin_balance=None, position_show=None, total_op
         total_open = total_open or 0.0
         msg += (
             f"\n\n📊 *带单账户总览*\n"
-            f"保证金余额：`{margin_balance:,.2f} USDT`\n"
-            f"未平仓货值：`{total_open:,.2f} USDT`\n"
+            f"保证金余额：`{wan(margin_balance)} USDT`\n"
+            f"未平仓货值：`{wan(total_open)} USDT`\n"
             f"总体杠杆：`{total_open / margin_balance:.2f}x`"
         )
         if position_show is False:
@@ -388,8 +393,8 @@ def main():
         if margin_balance and margin_balance > 0:
             total_open = total_open_notional()
             startup_account = (
-                f"\n带单保证金余额：`{margin_balance:,.2f} USDT`\n"
-                f"未平仓货值：`{total_open:,.2f} USDT`\n"
+                f"\n带单保证金余额：`{wan(margin_balance)} USDT`\n"
+                f"未平仓货值：`{wan(total_open)} USDT`\n"
                 f"总体杠杆：`{total_open / margin_balance:.2f}x`"
                 + ("（对方隐藏仓位，估算值）" if position_show is False else "")
             )
