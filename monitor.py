@@ -324,8 +324,10 @@ def build_trade_message(order, margin_balance=None, position_show=None, total_op
     price, qty, order_value, _, _, _ = calculate_order_value(order)
 
     lines = [
+        "🦅 *熬鹰资本最新交易提醒！*",
+        "",
         f"1、动作：{symbol} {short_action(order)}",
-        f"2、成交金额：{wan(order_value)} USDT",
+        f"2、成交金额：*{wan(order_value)} USDT*",
         f"3、成交均价：{price}",
         f"4、成交数量：{qty}",
     ]
