@@ -304,13 +304,13 @@ def fetch_account_snapshot():
 
 
 def short_action(order) -> str:
-    """简短动作（带红绿圆点）：🟢 开多 / 🔴 平多 / 🔴 开空 / 🟢 平空"""
+    """简短动作：开多 🟢 / 开空 🔴 / 平多、平空 🟡"""
     pos_side = order.get("positionSide")
     side = order.get("side")
     if pos_side == "LONG":
-        return "🟢 开多" if side == "BUY" else "🔴 平多"
+        return "🟢 开多" if side == "BUY" else "🟡 平多"
     if pos_side == "SHORT":
-        return "🔴 开空" if side == "SELL" else "🟢 平空"
+        return "🔴 开空" if side == "SELL" else "🟡 平空"
     return f"{side} {pos_side}"
 
 
@@ -324,8 +324,6 @@ def build_trade_message(order, margin_balance=None, position_show=None, total_op
     price, qty, order_value, _, _, _ = calculate_order_value(order)
 
     lines = [
-        "🦅 熬鹰资本",
-        "",
         f"1、动作：{symbol} {short_action(order)}",
         f"2、成交金额：{wan(order_value)} USDT",
         f"3、成交均价：{price}",
